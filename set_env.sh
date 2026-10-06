@@ -1,20 +1,20 @@
 #!/bin/bash
 
-
 export PROJECT_ID="finance-concur"
+export GOOGLE_CLOUD_PROJECT="finance-concur"
 export REGION="us-central1"
 export BUCKET_NAME="reports_to_check"
 export DATASTORE_ID="expense-policy_1789124227073_gcs_store"
 export SERVICE_ACCOUNT="receipt-processor-sa@finance-concur.iam.gserviceaccount.com"
 export IMPERSONATED_USER="v.ivshyn@astounddigital.com"
-export REPORT_RECIPIENT_EMAIL="v.ivshyn@astounddigital.com"
+export REPORT_RECIPIENT_EMAIL="v.ivshyn@astounddigital.com,n.merter@astounddigital.com"
 export SERVICE_ACCOUNT_FILE="finance-concur-251320b8ec47.json"
-export RECIPIENT_EMAIL="v.ivshyn@astounddigital.com"
-export IMPERSONATED_USER="v.ivshyn@astounddigital.com"
+export RECIPIENT_EMAIL="v.ivshyn@astounddigital.com,n.merter@astounddigital.com"
 export JOB="expense-precheck-job"
 
 echo "Environment variables set:"
 echo "PROJECT_ID: ${PROJECT_ID}"
+echo "GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT}"
 echo "REGION: ${REGION}"
 echo "BUCKET_NAME: ${BUCKET_NAME}"
 echo "DATASTORE_ID: ${DATASTORE_ID}"
