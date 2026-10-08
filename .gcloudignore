@@ -1,0 +1,11 @@
+cat << 'EOF' > .gcloudignore
+.git
+.gitignore
+__pycache__/
+.venv/
+!finance-concur-251320b8ec47.json
+return_test_files.sh
+schedule.sh
+set_env.sh
+deploy_job.sh
+EOF

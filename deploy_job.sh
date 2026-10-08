@@ -8,7 +8,7 @@ gcloud run jobs deploy "${JOB}" \
   --project "${PROJECT_ID}" \
   --region "${REGION}" \
   --source . \
-  --task-timeout "15m" \
+  --task-timeout "60m" \
   --service-account "${SERVICE_ACCOUNT}" \
   --set-env-vars "BUCKET_NAME=${BUCKET_NAME}" \
   --set-env-vars "DATASTORE_ID=${DATASTORE_ID}" \
