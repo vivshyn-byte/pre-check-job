@@ -9,7 +9,7 @@ from google.api_core.exceptions import ResourceExhausted
 import vertexai
 from vertexai.generative_models import GenerativeModel, Part, GenerationConfig, Tool
 from vertexai.preview.generative_models import grounding
-
+from datetime import datetime, timezone
 from html_formatter import generate_html_content_from_array
 from email_send import send_enterprise_email
 
@@ -27,7 +27,7 @@ def list_available_models():
     """Lists available Gemini models after configuration."""
     print(f"Fetching available models...")
     try:
-        model = GenerativeModel("gemini-2.5-pro")
+        model = GenerativeModel("gemini-2.5-pro")  # Attempt to instantiate a known model
         print(f"--- Available Gemini Models ---")
         # This is a placeholder as the direct listing is less straightforward.
         # We confirm the model we intend to use is available by instantiating it.
@@ -47,6 +47,11 @@ def analyze_report_with_gemini(report_data, project_id, datastore_id, system_ins
         expense_id = entry.get("expenseId", "Unknown")
         receipt_uri = entry.get("receiptImageReferenceURI")
         mime_type = entry.get("receiptDocumentType", "application/pdf")
+        
+        # Force application/pdf if the URI clearly points to a PDF
+        if receipt_uri and receipt_uri.lower().endswith('.pdf'):
+            mime_type = "application/pdf"
+
         
         if receipt_uri and receipt_uri.startswith("gs://"):
             prompt_parts.append(f"Receipt Image for expenseId: {expense_id}")
@@ -107,7 +112,8 @@ def analyze_report_with_gemini(report_data, project_id, datastore_id, system_ins
 def save_batch_results_to_gcs(bucket, batch_results):
     """Saves the aggregated AI results as a single JSON file in the results/ directory."""
     # Use a timestamp to prevent overwriting previous batch runs
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    # timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     destination_blob_name = f"results/batch_result_{timestamp}.json"
     
     blob = bucket.blob(destination_blob_name)
@@ -126,7 +132,8 @@ def move_file_to_processed(bucket, source_blob):
 def save_html_to_gcs(bucket, html_string):
     """Saves the HTML report string as a new file in the results/ directory on GCS."""
     # Use a timestamp to keep filenames unique and aligned with the JSON batch files
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    # timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     destination_blob_name = f"results/batch_result_{timestamp}.html"
     
     blob = bucket.blob(destination_blob_name)
@@ -137,6 +144,7 @@ def save_html_to_gcs(bucket, html_string):
     print(f"    [+] Saved HTML report to gs://{bucket.name}/{destination_blob_name}")
 
 def process_pending_reports():
+    
     bucket_name = os.environ.get("BUCKET_NAME")
     directory_path = os.environ.get("BUCKET_DIRECTORY", "reports/")
     

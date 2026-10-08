@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 def generate_html_content_from_array(records):
     """Takes a list of dictionary records and returns an HTML string."""
-    current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    
+#    current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
