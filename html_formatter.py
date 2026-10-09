@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 
 def generate_html_content_from_array(records):
@@ -17,6 +18,10 @@ def generate_html_content_from_array(records):
         .status-approved {{ background-color: #d1e7dd; color: #0f5132; padding: 4px 8px; border-radius: 12px; }}
         .status-declined {{ background-color: #f8d7da; color: #842029; padding: 4px 8px; border-radius: 12px; }}
         .status-warning {{ background-color: #fff3cd; color: #664d03; padding: 4px 8px; border-radius: 12px; }}
+        
+        .status-ok {{ background-color: #d1e7dd; color: #0f5132; padding: 4px 8px; border-radius: 12px; }}
+        .status-review {{ background-color: #f8d7da; color: #842029; padding: 4px 8px; border-radius: 12px; }}
+        
         a {{ color: #0056b3; text-decoration: none; font-weight: 500; }}
         a:hover {{ text-decoration: underline; }}
         .timestamp-subtitle {{ font-size: 0.9em; color: #6c757d; margin-top: -10px; margin-bottom: 20px; }}
@@ -30,13 +35,31 @@ def generate_html_content_from_array(records):
 """
     for row in records:
         status = row.get("Pre-check result", "Unknown")
-        status_class = f"status-{status.lower()}" if status in ["Approved", "Declined", "Warning"] else ""
-        
+        status_class = f"status-{status.lower()}" if status in ["OK", "Review", "Warning"] else ""
+        #status_class = f"status-{status.lower()}" if status in ["Approved", "Declined", "Warning"] else ""
         # We still extract the ReportID to construct the URL, even though it's hidden
         report_id = row.get("ReportID", "")
         report_name = row.get("Report name", "")
         owner_email = row.get("Owner e-mail", "")
         reasoning = row.get("Result Reasoning", "")
+
+        if reasoning:
+            # Add line break after each reasoning entry (pipe delimiter or newline)
+            reasoning = re.sub(r"\s*\|\s*", "<br>", reasoning)
+            reasoning = reasoning.replace("\n", "<br>")
+
+            if report_id:
+                def replace_expense_link(match):
+                    expense_id = match.group(1)
+                    concur_expense_link = (
+                        f"https://us2.concursolutions.com/nui/expense/reports/{report_id}/expenses/{expense_id}"
+                    )
+                    # Make the entire "Expense: <expense_id>" clickable
+                    return f'<a href="{concur_expense_link}" target="_blank" rel="noopener noreferrer">Expense: {expense_id}</a> '
+
+                # Matches "Expense: <expenseID>" followed by optional whitespace
+                pattern = r"Expense:?\s*([A-F0-9]+)\s*"
+                reasoning = re.sub(pattern, replace_expense_link, reasoning)
         
         concur_link = f"https://us2.concursolutions.com/nui/expense/reports/{report_id}" if report_id else "#"
         
