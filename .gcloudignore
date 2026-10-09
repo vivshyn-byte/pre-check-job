@@ -8,4 +8,5 @@ return_test_files.sh
 schedule.sh
 set_env.sh
 deploy_job.sh
+prompt_instructions_old.md
 EOF
