@@ -31,13 +31,14 @@ def generate_html_content_from_array(records):
     <h2>Expense Reports Pre-check Summary</h2>
     <p class="timestamp-subtitle">Generated on: {current_time}</p>
     <table>
-        <tr><th>Report Details</th><th>Owner</th><th>Status</th><th>Reasoning</th></tr>
+        <tr><th>Report Details</th><th>Country</th><th>Owner</th><th>Status</th><th>Reasoning</th></tr>
 """
     for row in records:
         status = row.get("Pre-check result", "Unknown")
         status_class = f"status-{status.lower()}" if status in ["OK", "Review", "Warning"] else ""
         #status_class = f"status-{status.lower()}" if status in ["Approved", "Declined", "Warning"] else ""
         # We still extract the ReportID to construct the URL, even though it's hidden
+        country = row.get("Country") or row.get("country", "")
         report_id = row.get("ReportID", "")
         report_name = row.get("Report name", "")
         owner_email = row.get("Owner e-mail", "")
@@ -66,6 +67,7 @@ def generate_html_content_from_array(records):
         html_content += f"""
         <tr>
             <td><a href="{concur_link}" target="_blank" rel="noopener noreferrer">{report_name}</a></td>
+            <td>{country}</td>
             <td><a href="mailto:{owner_email}">{owner_email}</a></td>
             <td><span class="{status_class}">{status}</span></td>
             <td>{reasoning}</td>

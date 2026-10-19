@@ -194,6 +194,8 @@ def process_pending_reports():
                 print(ai_result_json)
                 # Validate and parse JSON, then append to our batch array
                 parsed_result = json.loads(ai_result_json)
+                report_details = report_data.get("reportDetails", {}) if isinstance(report_data, dict) else {}
+                parsed_result["Country"] = report_details.get("country", "")
                 batch_results.append(parsed_result)
                 successfully_processed_blobs.append(blob)
 
@@ -214,6 +216,7 @@ def process_pending_reports():
                 error_entry = {
                     "ReportID": report_details.get("reportNumber") or report_details.get("reportId") or "UNKNOWN",
                     "Report name": report_details.get("name", "UNKNOWN"),
+                    "Country": report_details.get("country", "UNKNOWN"),
                     "Business purpose": business_purpose or "UNKNOWN",
                     "Owner e-mail": report_details.get("ownerEmail", "UNKNOWN"),
                     "Pre-check date-time": datetime.now().astimezone().isoformat(),

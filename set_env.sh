@@ -11,7 +11,6 @@ export SERVICE_ACCOUNT_FILE="finance-concur-251320b8ec47.json"
 export JOB="expense-precheck-job"
 
 echo "Environment variables set:"
-echo "PROJECT_ID: ${PROJECT_ID}"
 echo "GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT}"
 echo "REGION: ${REGION}"
 echo "BUCKET_NAME: ${BUCKET_NAME}"
