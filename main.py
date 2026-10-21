@@ -10,7 +10,7 @@ import vertexai
 from vertexai.generative_models import GenerativeModel, Part, GenerationConfig, Tool
 from vertexai.preview.generative_models import grounding
 from datetime import datetime, timezone
-from html_formatter import generate_html_content_from_array
+from html_formatter import generate_html_content_from_array, group_records_by_country, sanitize_country_code
 from email_send import send_enterprise_email
 
 
@@ -109,18 +109,18 @@ def analyze_report_with_gemini(report_data, project_id, datastore_id, system_ins
         
     return raw_text
 
-def save_batch_results_to_gcs(bucket, batch_results):
+def save_batch_results_to_gcs(bucket, batch_results, timestamp=None):
     """Saves the aggregated AI results as a single JSON file in the results/ directory."""
-    # Use a timestamp to prevent overwriting previous batch runs
-    # timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    if not timestamp:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     destination_blob_name = f"results/batch_result_{timestamp}.json"
-    
+
     blob = bucket.blob(destination_blob_name)
     result_json_string = json.dumps(batch_results, indent=2)
     blob.upload_from_string(result_json_string, content_type="application/json")
-    
+
     print(f"\n[SUCCESS] Saved aggregated batch results to gs://{bucket.name}/{destination_blob_name}")
+    return destination_blob_name
 
 def move_file_to_processed(bucket, source_blob):
     """Moves the processed file from reports/ to processed/ by copying and deleting."""
@@ -129,19 +129,40 @@ def move_file_to_processed(bucket, source_blob):
     source_blob.delete()
     print(f"    [+] Moved source file to gs://{bucket.name}/{destination_blob_name}")
 
-def save_html_to_gcs(bucket, html_string):
-    """Saves the HTML report string as a new file in the results/ directory on GCS."""
-    # Use a timestamp to keep filenames unique and aligned with the JSON batch files
-    # timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    destination_blob_name = f"results/batch_result_{timestamp}.html"
-    
+def save_html_to_gcs(bucket, html_string, timestamp=None, country=None, destination_blob_name=None):
+    """Saves the HTML report string as a new file in the results/ directory on GCS.
+
+    Can save global reports (default) or country-scoped reports when country is provided.
+    """
+    if not destination_blob_name:
+        if not timestamp:
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        if country:
+            country_suffix = sanitize_country_code(country)
+            destination_blob_name = f"results/batch_result_{timestamp}_{country_suffix}.html"
+        else:
+            destination_blob_name = f"results/batch_result_{timestamp}.html"
+
     blob = bucket.blob(destination_blob_name)
-    
-    # Upload the HTML string directly to GCS with the correct content type
     blob.upload_from_string(html_string, content_type="text/html")
-    
-    print(f"    [+] Saved HTML report to gs://{bucket.name}/{destination_blob_name}")
+
+    label = f" ({country})" if country else " (global)"
+    print(f"    [+] Saved HTML report{label} to gs://{bucket.name}/{destination_blob_name}")
+    return destination_blob_name
+
+def get_country_recipient_email(country_key):
+    """Retrieves the recipient email configured for a given country key from environment variables.
+
+    Looks for REPORT_RECIPIENT_EMAIL_{COUNTRY_KEY} (e.g. REPORT_RECIPIENT_EMAIL_UA).
+    """
+    if not country_key:
+        return None
+    code = sanitize_country_code(country_key)
+    env_var_name = f"REPORT_RECIPIENT_EMAIL_{code.upper()}"
+    recipient = os.environ.get(env_var_name)
+    if not recipient and code != country_key.upper():
+        recipient = os.environ.get(f"REPORT_RECIPIENT_EMAIL_{country_key.upper()}")
+    return recipient
 
 def process_pending_reports():
     
@@ -230,34 +251,87 @@ def process_pending_reports():
         # THE COMMIT PHASE: Save all results, THEN move the files
         # ---------------------------------------------------------
         if batch_results:
+            batch_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            formatted_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
             # 1. Save the aggregated JSON safely to GCS
-            save_batch_results_to_gcs(bucket, batch_results)
+            save_batch_results_to_gcs(bucket, batch_results, timestamp=batch_timestamp)
 
-            # 2. Try to generate HTML from the in-memory array immediately
+            # 2. Generate and save global HTML report to GCS
+            global_html_string = None
             try:
-                html_string = generate_html_content_from_array(batch_results)
-                save_html_to_gcs(bucket, html_string)
+                global_html_string = generate_html_content_from_array(batch_results, current_time=formatted_time)
+                save_html_to_gcs(bucket, global_html_string, timestamp=batch_timestamp)
             except Exception as e:
-                print(f"Non-fatal error generating HTML: {e}", file=sys.stderr)
-            # Send the HTML report via email
+                print(f"Non-fatal error generating/saving global HTML: {e}", file=sys.stderr)
+
+            # 3. Generate and save separate country HTML reports to GCS
+            country_groups = {}
             try:
-                html_string = generate_html_content_from_array(batch_results)
-                subject = "Enterprise Pre-Check Report"
-                impersonated_user = os.environ.get("IMPERSONATED_USER")
-                recipient = os.environ.get("REPORT_RECIPIENT_EMAIL")
-                if not impersonated_user or not recipient:
-                    print("Error: IMPERSONATED_USER and REPORT_RECIPIENT_EMAIL must be set for email sending.", file=sys.stderr)
-                else:
-                    send_enterprise_email(html_string, subject, impersonated_user, recipient)
+                country_groups = group_records_by_country(batch_results)
+                print(f"\nGenerating country-specific HTML reports for {len(country_groups)} country group(s)...")
+                for country_key, group_info in sorted(country_groups.items()):
+                    try:
+                        c_display = group_info["display_name"]
+                        c_records = group_info["records"]
+                        c_html = generate_html_content_from_array(
+                            c_records,
+                            country=c_display,
+                            current_time=formatted_time
+                        )
+                        save_html_to_gcs(
+                            bucket,
+                            c_html,
+                            timestamp=batch_timestamp,
+                            country=country_key
+                        )
+                    except Exception as country_err:
+                        print(f"Non-fatal error generating/saving HTML report for country '{country_key}': {country_err}", file=sys.stderr)
             except Exception as e:
-                print(f"Non-fatal error sending email: {e}", file=sys.stderr)
+                print(f"Non-fatal error grouping records by country: {e}", file=sys.stderr)
 
+            # 4. Email notifications
+            impersonated_user = os.environ.get("IMPERSONATED_USER")
+            if not impersonated_user:
+                print("Error: IMPERSONATED_USER must be set for email sending.", file=sys.stderr)
+            else:
+                # 4a. Send global HTML report via email
+                try:
+                    global_recipient = os.environ.get("REPORT_RECIPIENT_EMAIL")
+                    if not global_recipient:
+                        print("Notice: REPORT_RECIPIENT_EMAIL is not set. Skipping global email sending.", file=sys.stderr)
+                    else:
+                        if not global_html_string:
+                            global_html_string = generate_html_content_from_array(batch_results, current_time=formatted_time)
+                        global_subject = "Enterprise Pre-Check Report"
+                        send_enterprise_email(global_html_string, global_subject, impersonated_user, global_recipient)
+                except Exception as e:
+                    print(f"Non-fatal error sending global email: {e}", file=sys.stderr)
 
-            # 3. Since the save succeeded, it is now safe to move the files
+                # 4b. Send country-specific HTML reports via email
+                for country_key, group_info in sorted(country_groups.items()):
+                    try:
+                        country_recipient = get_country_recipient_email(country_key)
+                        c_display = group_info["display_name"]
+                        if not country_recipient:
+                            print(f"    [*] No email recipient configured for country '{country_key}' (REPORT_RECIPIENT_EMAIL_{country_key}). Skipping country email.")
+                            continue
+
+                        c_records = group_info["records"]
+                        c_html = generate_html_content_from_array(
+                            c_records,
+                            country=c_display,
+                            current_time=formatted_time
+                        )
+                        c_subject = f"Enterprise Pre-Check Report - {c_display}"
+                        send_enterprise_email(c_html, c_subject, impersonated_user, country_recipient)
+                    except Exception as country_email_err:
+                        print(f"Non-fatal error sending email for country '{country_key}': {country_email_err}", file=sys.stderr)
+
+            # 5. Since the saves succeeded, it is now safe to move the files
             print("\nCleaning up processed files...")
             for blob in successfully_processed_blobs:
                 move_file_to_processed(bucket, blob)
-                pass
         else:
             print("\nNo evaluations completed. No files were moved.")
 
