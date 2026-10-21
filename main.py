@@ -217,6 +217,12 @@ def process_pending_reports():
                 parsed_result = json.loads(ai_result_json)
                 report_details = report_data.get("reportDetails", {}) if isinstance(report_data, dict) else {}
                 parsed_result["Country"] = report_details.get("country", "")
+                expense_entries = report_data.get("expenseEntries", []) if isinstance(report_data, dict) else []
+                parsed_result["expense_purposes"] = {
+                    str(entry.get("expenseId")): entry.get("businessPurpose", "")
+                    for entry in expense_entries
+                    if isinstance(entry, dict) and entry.get("expenseId")
+                }
                 batch_results.append(parsed_result)
                 successfully_processed_blobs.append(blob)
 
@@ -242,10 +248,14 @@ def process_pending_reports():
                     "Owner e-mail": report_details.get("ownerEmail", "UNKNOWN"),
                     "Pre-check date-time": datetime.now().astimezone().isoformat(),
                     "Pre-check result": "Error",
-                    "Result Reasoning": error_message
+                    "Result Reasoning": error_message,
+                    "expense_purposes": {
+                        str(entry.get("expenseId")): entry.get("businessPurpose", "")
+                        for entry in expense_entries
+                        if isinstance(entry, dict) and entry.get("expenseId")
+                    }
                 }
                 batch_results.append(error_entry)
-                successfully_processed_blobs.append(blob)
 
         # ---------------------------------------------------------
         # THE COMMIT PHASE: Save all results, THEN move the files

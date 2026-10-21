@@ -33,7 +33,7 @@ For each `expenseEntry` in a report, you must execute the following three-step v
   "Business purpose": "string",
   "Owner e-mail": "string",
   "Pre-check date-time": "string (ISO 8601)",
-  "Pre-check result": "Declined, Warning, or Approved",
+  "Pre-check result": "OK, Warning, or Review",
   "Result Reasoning": "string (Explanation of violations)"
 }}
 ```

@@ -102,6 +102,10 @@ def generate_html_content_from_array(records, country=None, title=None, current_
 
         .status-ok {{ background-color: #d1e7dd; color: #0f5132; padding: 4px 8px; border-radius: 12px; }}
         .status-review {{ background-color: #f8d7da; color: #842029; padding: 4px 8px; border-radius: 12px; }}
+        .status-error {{ background-color: #e2e3e5; color: #41464b; padding: 4px 8px; border-radius: 12px; }}
+
+        tr.row-error {{ color: #8c959f; background-color: #f8f9fa; opacity: 0.7; }}
+        tr.row-error a {{ color: #6e7781; }}
 
         a {{ color: #0056b3; text-decoration: none; font-weight: 500; }}
         a:hover {{ text-decoration: underline; }}
@@ -116,7 +120,8 @@ def generate_html_content_from_array(records, country=None, title=None, current_
 """
     for row in records:
         status = row.get("Pre-check result", "Unknown")
-        status_class = f"status-{status.lower()}" if status in ["OK", "Review", "Warning"] else ""
+        status_class = f"status-{status.lower()}" if status in ["OK", "Review", "Warning", "Error"] else ""
+        row_class = ' class="row-error"' if str(status).strip().lower() == "error" else ""
         #status_class = f"status-{status.lower()}" if status in ["Approved", "Declined", "Warning"] else ""
         # We still extract the ReportID to construct the URL, even though it's hidden
         country = row.get("Country") or row.get("country", "")
@@ -130,23 +135,32 @@ def generate_html_content_from_array(records, country=None, title=None, current_
             reasoning = re.sub(r"\s*\|\s*", "<br>", reasoning)
             reasoning = reasoning.replace("\n", "<br>")
 
-            if report_id:
-                def replace_expense_link(match):
-                    expense_id = match.group(1)
-                    concur_expense_link = (
-                        f"https://us2.concursolutions.com/nui/expense/reports/{report_id}/expenses/{expense_id}"
-                    )
-                    # Make the entire "Expense: <expense_id>" clickable
-                    return f'<a href="{concur_expense_link}" target="_blank" rel="noopener noreferrer">Expense: {expense_id}</a> '
+            expense_purposes = row.get("expense_purposes") or {}
+            if not expense_purposes and "expenseEntries" in row:
+                expense_purposes = {
+                    str(entry.get("expenseId")): entry.get("businessPurpose", "")
+                    for entry in row.get("expenseEntries", [])
+                    if isinstance(entry, dict) and entry.get("expenseId")
+                }
 
-                # Matches "Expense: <expenseID>" followed by optional whitespace
-                pattern = r"Expense:?\s*([A-F0-9]+)\s*"
-                reasoning = re.sub(pattern, replace_expense_link, reasoning)
+            def replace_expense_format(match):
+                expense_id = match.group(1)
+                purpose = (
+                    expense_purposes.get(expense_id)
+                    or expense_purposes.get(expense_id.upper())
+                    or expense_purposes.get(expense_id.lower())
+                    or ""
+                )
+                purpose_str = str(purpose).strip()
+                return f"Expense: ({purpose_str}) - {expense_id}"
+
+            pattern = r"Expense:?\s*(?:\([^)]*\)\s*-\s*)?([A-Fa-f0-9]+)"
+            reasoning = re.sub(pattern, replace_expense_format, reasoning)
         
         concur_link = f"https://us2.concursolutions.com/nui/expense/reports/{report_id}" if report_id else "#"
         
         html_content += f"""
-        <tr>
+        <tr{row_class}>
             <td><a href="{concur_link}" target="_blank" rel="noopener noreferrer">{report_name}</a></td>
             <td>{country}</td>
             <td><a href="mailto:{owner_email}">{owner_email}</a></td>
