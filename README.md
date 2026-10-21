@@ -9,8 +9,8 @@ Automated audit service for employee expense reports powered by Vertex AI Gemini
 1. **Trigger**: Cloud Run Job executed on a schedule (e.g., via Cloud Scheduler) or manually.
 2. **Input**: Cloud Storage bucket prefix `reports/*.json`.
 3. **Evaluation**: Vertex AI Gemini model grounded with corporate policy documents in Vertex AI Search.
-4. **Storage**: Summary results stored as JSON and HTML files in `results/` on GCS.
-5. **Notification**: Formatted HTML summary sent via Gmail API using Domain-Wide Delegation.
+4. **Storage**: Summary results stored as JSON (`results/batch_result_{timestamp}.json`), global HTML (`results/batch_result_{timestamp}.html`), and separate country HTML reports (`results/batch_result_{timestamp}_{COUNTRY}.html`) in `results/` on GCS.
+5. **Notification**: Formatted HTML summary sent via Gmail API using Domain-Wide Delegation to `REPORT_RECIPIENT_EMAIL` (global digest) and to country-specific recipients (`REPORT_RECIPIENT_EMAIL_{COUNTRY}`).
 
 ---
 
@@ -86,6 +86,22 @@ Because the service sends emails on behalf of a Google Workspace user via the Gm
 
 ---
 
+## Supported Country Mapping
+
+Country names and codes present in report payloads are normalized to standardized country keys for grouping and recipient routing:
+
+| Country Key | Country Name | Environment Recipient Variable |
+|---|---|---|
+| `UA` | Ukraine | `REPORT_RECIPIENT_EMAIL_UA` |
+| `US` | United States | `REPORT_RECIPIENT_EMAIL_US` |
+| `UK` | United Kingdom | `REPORT_RECIPIENT_EMAIL_UK` |
+| `DE` | Germany | `REPORT_RECIPIENT_EMAIL_DE` |
+| `SK` | Slovakia | `REPORT_RECIPIENT_EMAIL_SK` |
+| `IN` | India | `REPORT_RECIPIENT_EMAIL_IN` |
+| `CO` | Colombia | `REPORT_RECIPIENT_EMAIL_CO` |
+
+---
+
 ## Environment Variables
 
 | Variable | Required | Description | Example |
@@ -97,6 +113,8 @@ Because the service sends emails on behalf of a Google Workspace user via the Gm
 | `DATASTORE_ID` | No | Vertex AI Search Datastore ID or full resource path | `expense-policies-ds` |
 | `IMPERSONATED_USER` | Yes | Workspace email to send from | `finance-audit@company.com` |
 | `REPORT_RECIPIENT_EMAIL` | Yes | Email recipient for summary report | `audit-team@company.com` |
+| `REPORT_RECIPIENT_EMAIL_{COUNTRY}` | No | Country-specific AP email recipient (e.g. `REPORT_RECIPIENT_EMAIL_UA`, `_US`, `_UK`, `_DE`, `_SK`, `_IN`, `_CO`) | `ap-ua@astounddigital.com` |
+| `JOB` | No | Cloud Run job resource name | `expense-precheck-job` |
 | `SERVICE_ACCOUNT_FILE` | Optional* | File path to SA key JSON | `/secrets/sa-key.json` |
 | `SERVICE_ACCOUNT_INFO` | Optional* | Stringified JSON of SA private key | `{"type": "service_account", ...}` |
 
@@ -104,62 +122,47 @@ Because the service sends emails on behalf of a Google Workspace user via the Gm
 
 ---
 
-## Deployment Script
+## Deployment
 
-Create a deployment shell script (`deploy.sh`) to automate container building and Cloud Run Job deployment:
+The project includes `set_env.sh` and `deploy_job.sh` for configuring environment variables and deploying the job to Cloud Run directly using source-based deployment:
+
+1. **Configure environment settings** in `set_env.sh`:
+   ```bash
+   export GOOGLE_CLOUD_PROJECT="<YOUR_PROJECT_ID>"
+   export REGION="us-central1"
+   export BUCKET_NAME="reports_to_check"
+   export DATASTORE_ID="<YOUR_DATASTORE_ID>"
+   export SERVICE_ACCOUNT="<YOUR_SA_EMAIL>"
+   export IMPERSONATED_USER="<SENDER_EMAIL>"
+   export REPORT_RECIPIENT_EMAIL="<GLOBAL_RECIPIENTS>"
+   export REPORT_RECIPIENT_EMAIL_UA="ap-ua@company.com"
+   export REPORT_RECIPIENT_EMAIL_US="ap-na@company.com"
+   export REPORT_RECIPIENT_EMAIL_UK="ap-uk@company.com"
+   export REPORT_RECIPIENT_EMAIL_DE="ap-ge@company.com"
+   export REPORT_RECIPIENT_EMAIL_SK="ap-sk@company.com"
+   export REPORT_RECIPIENT_EMAIL_IN="ap-ind@company.com"
+   export REPORT_RECIPIENT_EMAIL_CO="ap-co@company.com"
+   export SERVICE_ACCOUNT_FILE="<PATH_TO_SA_KEY_JSON>"
+   export JOB="expense-precheck-job"
+   ```
+
+2. **Deploy and run the job**:
+   ```bash
+   chmod +x set_env.sh deploy_job.sh
+   ./deploy_job.sh
+   ```
+
+`deploy_job.sh` builds the container image from local source via Google Cloud Build and provisions the Cloud Run job:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Configuration
-PROJECT_ID="<YOUR_GCP_PROJECT_ID>"
-REGION="us-central1"
-JOB_NAME="expense-precheck-job"
-REPOSITORY="pre-check-repo"
-IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${JOB_NAME}:latest"
-SA_EMAIL="expense-precheck-sa@${PROJECT_ID}.iam.gserviceaccount.com"
-
-BUCKET_NAME="<YOUR_EXPENSE_BUCKET>"
-DATASTORE_ID="<YOUR_DATASTORE_ID>"
-IMPERSONATED_USER="<SENDER_EMAIL@YOUR_DOMAIN.COM>"
-REPORT_RECIPIENT_EMAIL="<RECIPIENT_EMAIL@YOUR_DOMAIN.COM>"
-SECRET_NAME="gmail-dwd-sa-key"
-
-echo "==> Configuring gcloud project..."
-gcloud config set project "${PROJECT_ID}"
-
-echo "==> Ensuring Artifact Registry repository exists..."
-gcloud artifacts repositories describe "${REPOSITORY}" --location="${REGION}" >/dev/null 2>&1 || \
-gcloud artifacts repositories create "${REPOSITORY}" \
-    --repository-format=docker \
-    --location="${REGION}" \
-    --description="Docker repository for expense precheck job"
-
-echo "==> Building and pushing container image via Cloud Build..."
-gcloud builds submit --tag "${IMAGE_NAME}" .
-
-echo "==> Storing SA Key into Secret Manager (if not present)..."
-if ! gcloud secrets describe "${SECRET_NAME}" >/dev/null 2>&1; then
-    gcloud secrets create "${SECRET_NAME}" --data-file=sa-key.json
-    gcloud secrets add-iam-policy-binding "${SECRET_NAME}" \
-        --member="serviceAccount:${SA_EMAIL}" \
-        --role="roles/secretmanager.secretAccessor"
-fi
-
-echo "==> Deploying Cloud Run Job..."
-gcloud run jobs deploy "${JOB_NAME}" \
-    --image="${IMAGE_NAME}" \
+gcloud run jobs deploy "${JOB}" \
+    --project "${GOOGLE_CLOUD_PROJECT}" \
     --region="${REGION}" \
-    --service-account="${SA_EMAIL}" \
-    --set-env-vars="BUCKET_NAME=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},REGION=${REGION},DATASTORE_ID=${DATASTORE_ID},IMPERSONATED_USER=${IMPERSONATED_USER},REPORT_RECIPIENT_EMAIL=${REPORT_RECIPIENT_EMAIL},SERVICE_ACCOUNT_FILE=/secrets/sa-key.json" \
-    --set-secrets="/secrets/sa-key.json=${SECRET_NAME}:latest" \
-    --max-retries=0 \
-    --task-timeout=30m
-
-echo "==> Deployment successful!"
-echo "To execute the job manually, run:"
-echo "    gcloud run jobs execute ${JOB_NAME} --region=${REGION}"
+    --source . \
+    --task-timeout "60m" \
+    --service-account "${SERVICE_ACCOUNT}" \
+    --max-retries 0 \
+    --execute-now
 ```
 
 ---
