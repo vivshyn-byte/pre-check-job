@@ -408,7 +408,7 @@ def process_pending_reports():
                         if not global_html_string:
                             global_html_string = generate_html_content_from_array(batch_results, current_time=formatted_time)
                         global_subject = "Enterprise Pre-Check Report"
-                        #send_enterprise_email(global_html_string, global_subject, impersonated_user, global_recipient)
+                        send_enterprise_email(global_html_string, global_subject, impersonated_user, global_recipient)
                 except Exception as e:
                     print(f"Non-fatal error sending global email: {e}", file=sys.stderr)
 
@@ -428,7 +428,7 @@ def process_pending_reports():
                             current_time=formatted_time
                         )
                         c_subject = f"Enterprise Pre-Check Report - {c_display}"
-                        #send_enterprise_email(c_html, c_subject, impersonated_user, country_recipient)
+                        send_enterprise_email(c_html, c_subject, impersonated_user, country_recipient)
                     except Exception as country_email_err:
                         print(f"Non-fatal error sending email for country '{country_key}': {country_email_err}", file=sys.stderr)
 
