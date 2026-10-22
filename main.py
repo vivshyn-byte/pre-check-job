@@ -11,6 +11,7 @@ from vertexai.generative_models import GenerativeModel, Part, GenerationConfig, 
 from vertexai.preview.generative_models import grounding
 from datetime import datetime, timezone
 from html_formatter import generate_html_content_from_array, group_records_by_country, sanitize_country_code
+from excel_formatter import generate_excel_from_array, save_excel_to_gcs
 from email_send import send_enterprise_email
 
 
@@ -36,26 +37,86 @@ def list_available_models():
     except Exception as e:
         print(f"Failed to list models: {e}", file=sys.stderr)
 
+MIME_TYPE_MAP = {
+    "pdf": "application/pdf",
+    "application/pdf": "application/pdf",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "image/jpg": "image/jpeg",
+    "image/pjpeg": "image/jpeg",
+    "image/jpeg": "image/jpeg",
+    "png": "image/png",
+    "image/png": "image/png",
+    "webp": "image/webp",
+    "image/webp": "image/webp",
+    "heic": "image/heic",
+    "image/heic": "image/heic",
+    "heif": "image/heif",
+    "image/heif": "image/heif",
+    "gif": "image/gif",
+    "image/gif": "image/gif",
+    "tif": "image/tiff",
+    "tiff": "image/tiff",
+    "image/tiff": "image/tiff",
+}
+
+
+def resolve_receipt_mime_type(receipt_uri, raw_mime_type=None):
+    """Resolves and normalizes the MIME type for a receipt document or image.
+
+    Guarantees a valid, non-empty MIME type for Gemini Part.from_uri.
+    Handles empty strings, None, whitespace, common abbreviations (e.g. 'pdf', 'jpg'),
+    and infers from file extension if raw_mime_type is missing or ambiguous.
+    """
+    cleaned_type = str(raw_mime_type or "").strip().lower()
+
+    if cleaned_type in MIME_TYPE_MAP:
+        return MIME_TYPE_MAP[cleaned_type]
+
+    # If MIME type is missing or generic, infer from URI extension
+    if not cleaned_type or cleaned_type in ["application/octet-stream", "binary/octet-stream", "unknown", "null"]:
+        if receipt_uri:
+            clean_path = receipt_uri.split("?")[0].split("#")[0].lower()
+            for ext, mtype in [
+                (".pdf", "application/pdf"),
+                (".jpg", "image/jpeg"),
+                (".jpeg", "image/jpeg"),
+                (".png", "image/png"),
+                (".webp", "image/webp"),
+                (".heic", "image/heic"),
+                (".heif", "image/heif"),
+                (".gif", "image/gif"),
+                (".tif", "image/tiff"),
+                (".tiff", "image/tiff"),
+            ]:
+                if clean_path.endswith(ext):
+                    return mtype
+
+    if "/" in cleaned_type and not cleaned_type.endswith("/"):
+        return cleaned_type
+
+    # Default fallback to application/pdf so mimeType is never empty
+    return "application/pdf"
+
+
 def analyze_report_with_gemini(report_data, project_id, datastore_id, system_instructions):
     """Sends the report and receipts to Gemini for policy evaluation using the GenAI SDK."""
     model_name = "gemini-2.5-pro" # Use a stable, widely available model
-    prompt_parts = []
-    
-    prompt_parts.append(f"{system_instructions}\n\nReport Data:\n{json.dumps(report_data)}")
-    
+    text_prompt = f"{system_instructions}\n\nReport Data:\n{json.dumps(report_data)}"
+    prompt_parts = [text_prompt]
+
+    receipt_parts = []
     for entry in report_data.get("expenseEntries", []):
         expense_id = entry.get("expenseId", "Unknown")
         receipt_uri = entry.get("receiptImageReferenceURI")
-        mime_type = entry.get("receiptDocumentType", "application/pdf")
-        
-        # Force application/pdf if the URI clearly points to a PDF
-        if receipt_uri and receipt_uri.lower().endswith('.pdf'):
-            mime_type = "application/pdf"
+        raw_doc_type = entry.get("receiptDocumentType")
 
-        
         if receipt_uri and receipt_uri.startswith("gs://"):
-            prompt_parts.append(f"Receipt Image for expenseId: {expense_id}")
-            prompt_parts.append(Part.from_uri(uri=receipt_uri, mime_type=mime_type))
+            mime_type = resolve_receipt_mime_type(receipt_uri, raw_doc_type)
+            receipt_parts.append(f"Receipt Image for expenseId: {expense_id}")
+            receipt_parts.append(Part.from_uri(uri=receipt_uri, mime_type=mime_type))
+
+    prompt_parts.extend(receipt_parts)
 
     config = GenerationConfig(temperature=0.0)
     tools = None
@@ -75,13 +136,15 @@ def analyze_report_with_gemini(report_data, project_id, datastore_id, system_ins
 
     max_retries = 5
     base_delay = 5.0
+    current_parts = list(prompt_parts)
+    has_receipts = bool(receipt_parts)
 
     for attempt in range(max_retries + 1):
         try:
             # Instantiate the model. The client configuration is picked up automatically.
             model = GenerativeModel(model_name)
             response = model.generate_content(
-                contents=prompt_parts,
+                contents=current_parts,
                 generation_config=config,
                 tools=tools
             )
@@ -94,6 +157,15 @@ def analyze_report_with_gemini(report_data, project_id, datastore_id, system_ins
             print(f" -> 429 Quota exhausted. Retrying in {sleep_time:.2f}s (attempt {attempt + 1}/{max_retries})...", file=sys.stderr)
             time.sleep(sleep_time)
         except Exception as e:
+            err_str = str(e)
+            # If an invalid argument or bad image error occurs on receipt attachments,
+            # retry without receipt images so the report data itself can still be evaluated.
+            if has_receipts and any(k in err_str for k in ["mimeType", "fileData", "image", "media", "InvalidArgument", "400"]):
+                print(f" -> Warning: Failed with receipt attachments ({e!r}). Retrying with text-only evaluation...", file=sys.stderr)
+                current_parts = [text_prompt]
+                has_receipts = False
+                continue
+
             print(f"GenAI SDK API Error: {e!r}", file=sys.stderr)
             raise
         
@@ -275,15 +347,22 @@ def process_pending_reports():
             except Exception as e:
                 print(f"Non-fatal error generating/saving global HTML: {e}", file=sys.stderr)
 
-            # 3. Generate and save separate country HTML reports to GCS
+            # 3. Generate and save global Excel spreadsheet report to GCS
+            try:
+                global_excel_bytes = generate_excel_from_array(batch_results, current_time=formatted_time)
+                save_excel_to_gcs(bucket, global_excel_bytes, timestamp=batch_timestamp)
+            except Exception as e:
+                print(f"Non-fatal error generating/saving global Excel: {e}", file=sys.stderr)
+
+            # 4. Generate and save separate country HTML and Excel reports to GCS
             country_groups = {}
             try:
                 country_groups = group_records_by_country(batch_results)
-                print(f"\nGenerating country-specific HTML reports for {len(country_groups)} country group(s)...")
+                print(f"\nGenerating country-specific reports for {len(country_groups)} country group(s)...")
                 for country_key, group_info in sorted(country_groups.items()):
+                    c_display = group_info["display_name"]
+                    c_records = group_info["records"]
                     try:
-                        c_display = group_info["display_name"]
-                        c_records = group_info["records"]
                         c_html = generate_html_content_from_array(
                             c_records,
                             country=c_display,
@@ -297,10 +376,25 @@ def process_pending_reports():
                         )
                     except Exception as country_err:
                         print(f"Non-fatal error generating/saving HTML report for country '{country_key}': {country_err}", file=sys.stderr)
+
+                    try:
+                        c_excel = generate_excel_from_array(
+                            c_records,
+                            country=c_display,
+                            current_time=formatted_time
+                        )
+                        save_excel_to_gcs(
+                            bucket,
+                            c_excel,
+                            timestamp=batch_timestamp,
+                            country=country_key
+                        )
+                    except Exception as country_excel_err:
+                        print(f"Non-fatal error generating/saving Excel report for country '{country_key}': {country_excel_err}", file=sys.stderr)
             except Exception as e:
                 print(f"Non-fatal error grouping records by country: {e}", file=sys.stderr)
 
-            # 4. Email notifications
+            # 5. Email notifications
             impersonated_user = os.environ.get("IMPERSONATED_USER")
             if not impersonated_user:
                 print("Error: IMPERSONATED_USER must be set for email sending.", file=sys.stderr)
@@ -314,7 +408,7 @@ def process_pending_reports():
                         if not global_html_string:
                             global_html_string = generate_html_content_from_array(batch_results, current_time=formatted_time)
                         global_subject = "Enterprise Pre-Check Report"
-                        send_enterprise_email(global_html_string, global_subject, impersonated_user, global_recipient)
+                        #send_enterprise_email(global_html_string, global_subject, impersonated_user, global_recipient)
                 except Exception as e:
                     print(f"Non-fatal error sending global email: {e}", file=sys.stderr)
 
@@ -334,7 +428,7 @@ def process_pending_reports():
                             current_time=formatted_time
                         )
                         c_subject = f"Enterprise Pre-Check Report - {c_display}"
-                        send_enterprise_email(c_html, c_subject, impersonated_user, country_recipient)
+                        #send_enterprise_email(c_html, c_subject, impersonated_user, country_recipient)
                     except Exception as country_email_err:
                         print(f"Non-fatal error sending email for country '{country_key}': {country_email_err}", file=sys.stderr)
 

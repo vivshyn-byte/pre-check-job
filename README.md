@@ -1,6 +1,6 @@
 # Expense Reports Pre-Check Job
 
-Automated audit service for employee expense reports powered by Vertex AI Gemini and Google Cloud Run Jobs. The job audits expense JSON reports against corporate policies stored in Vertex AI Search (Data Store), saves evaluated JSON/HTML reports to Cloud Storage, and emails summary digests via Gmail API using Google Workspace Domain-Wide Delegation.
+Automated audit service for employee expense reports powered by Vertex AI Gemini and Google Cloud Run Jobs. The job audits expense JSON reports against corporate policies stored in Vertex AI Search (Data Store), saves evaluated JSON/HTML/Excel reports to Cloud Storage, and emails summary digests via Gmail API using Google Workspace Domain-Wide Delegation.
 
 ---
 
@@ -9,7 +9,7 @@ Automated audit service for employee expense reports powered by Vertex AI Gemini
 1. **Trigger**: Cloud Run Job executed on a schedule (e.g., via Cloud Scheduler) or manually.
 2. **Input**: Cloud Storage bucket prefix `reports/*.json`.
 3. **Evaluation**: Vertex AI Gemini model grounded with corporate policy documents in Vertex AI Search.
-4. **Storage**: Summary results stored as JSON (`results/batch_result_{timestamp}.json`), global HTML (`results/batch_result_{timestamp}.html`), and separate country HTML reports (`results/batch_result_{timestamp}_{COUNTRY}.html`) in `results/` on GCS.
+4. **Storage**: Summary results stored as JSON (`results/batch_result_{timestamp}.json`), HTML (`results/batch_result_{timestamp}.html`), separate country HTML reports (`results/batch_result_{timestamp}_{COUNTRY}.html`), and Excel spreadsheets (`results/batch_result_{timestamp}.xlsx` and `results/batch_result_{timestamp}_{COUNTRY}.xlsx`) in `results/` on GCS (`gs://reports_to_check/results`).
 5. **Notification**: Formatted HTML summary sent via Gmail API using Domain-Wide Delegation to `REPORT_RECIPIENT_EMAIL` (global digest) and to country-specific recipients (`REPORT_RECIPIENT_EMAIL_{COUNTRY}`).
 
 ---
