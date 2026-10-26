@@ -9,7 +9,7 @@ Automated audit service for employee expense reports powered by Vertex AI Gemini
 1. **Trigger**: Cloud Run Job executed on a schedule (e.g., via Cloud Scheduler) or manually.
 2. **Input**: Cloud Storage bucket prefix `reports/*.json`.
 3. **Evaluation**: Vertex AI Gemini model grounded with corporate policy documents in Vertex AI Search.
-4. **Storage**: Summary results stored as JSON (`results/batch_result_{timestamp}.json`), HTML (`results/batch_result_{timestamp}.html`), separate country HTML reports (`results/batch_result_{timestamp}_{COUNTRY}.html`), and Excel spreadsheets (`results/batch_result_{timestamp}.xlsx` and `results/batch_result_{timestamp}_{COUNTRY}.xlsx`) in `results/` on GCS (`gs://reports_to_check/results`).
+4. **Storage**: Summary results stored as JSON (`results/batch_result_{timestamp}.json`), HTML (`results/batch_result_{timestamp}.html`), separate country HTML reports (`results/batch_result_{timestamp}_{COUNTRY}.html`), and Excel spreadsheets (`results/batch_result_{timestamp}.xlsx` and `results/batch_result_{timestamp}_{COUNTRY}.xlsx`) in `results/` on GCS (`gs://reports_to_check/results`). The consolidated batch Excel spreadsheet is also uploaded directly to Google Drive.
 5. **Notification**: Formatted HTML summary sent via Gmail API using Domain-Wide Delegation to `REPORT_RECIPIENT_EMAIL` (global digest) and to country-specific recipients (`REPORT_RECIPIENT_EMAIL_{COUNTRY}`).
 
 ---
@@ -30,6 +30,7 @@ Automated audit service for employee expense reports powered by Vertex AI Gemini
       discoveryengine.googleapis.com \
       storage.googleapis.com \
       gmail.googleapis.com \
+      drive.googleapis.com \
       secretmanager.googleapis.com
   ```
 
@@ -84,6 +85,15 @@ Because the service sends emails on behalf of a Google Workspace user via the Gm
      * **OAuth Scopes**: `https://www.googleapis.com/auth/gmail.send`
    * Click **Authorize**.
 
+### 4. Google Drive Folder Access
+
+The consolidated Excel report is automatically uploaded to Google Drive:
+
+1. In Google Drive, create or choose a folder (or Shared Drive) for storing expense reports.
+2. Share the folder with the service account email (e.g. `receipt-processor-sa@finance-concur.iam.gserviceaccount.com`) granting **Editor** (or **Content Manager** for Shared Drives) permissions.
+3. Obtain the folder ID from the folder URL (the string after `/folders/` in `https://drive.google.com/drive/folders/<FOLDER_ID>`).
+4. Set the `GOOGLE_DRIVE_FOLDER_ID` environment variable in `set_env.sh`.
+
 ---
 
 ## Supported Country Mapping
@@ -115,6 +125,7 @@ Country names and codes present in report payloads are normalized to standardize
 | `REPORT_RECIPIENT_EMAIL` | Yes | Email recipient for summary report | `audit-team@company.com` |
 | `REPORT_RECIPIENT_EMAIL_{COUNTRY}` | No | Country-specific AP email recipient (e.g. `REPORT_RECIPIENT_EMAIL_UA`, `_US`, `_UK`, `_DE`, `_SK`, `_IN`, `_CO`) | `ap-ua@astounddigital.com` |
 | `JOB` | No | Cloud Run job resource name | `expense-precheck-job` |
+| `GOOGLE_DRIVE_FOLDER_ID` | No | Google Drive target folder ID for consolidated Excel report | `1A2b3C4d5E6f7G8h9I0j` |
 | `SERVICE_ACCOUNT_FILE` | Optional* | File path to SA key JSON | `/secrets/sa-key.json` |
 | `SERVICE_ACCOUNT_INFO` | Optional* | Stringified JSON of SA private key | `{"type": "service_account", ...}` |
 
@@ -144,6 +155,7 @@ The project includes `set_env.sh` and `deploy_job.sh` for configuring environmen
    export REPORT_RECIPIENT_EMAIL_CO="ap-co@company.com"
    export SERVICE_ACCOUNT_FILE="<PATH_TO_SA_KEY_JSON>"
    export JOB="expense-precheck-job"
+   export GOOGLE_DRIVE_FOLDER_ID="<GOOGLE_DRIVE_FOLDER_ID>"
    ```
 
 2. **Deploy and run the job**:

@@ -12,6 +12,7 @@ from vertexai.preview.generative_models import grounding
 from datetime import datetime, timezone
 from html_formatter import generate_html_content_from_array, group_records_by_country, sanitize_country_code
 from excel_formatter import generate_excel_from_array, save_excel_to_gcs
+from google_drive_uploader import upload_excel_to_drive
 from email_send import send_enterprise_email
 
 
@@ -347,12 +348,28 @@ def process_pending_reports():
             except Exception as e:
                 print(f"Non-fatal error generating/saving global HTML: {e}", file=sys.stderr)
 
-            # 3. Generate and save global Excel spreadsheet report to GCS
+            # 3. Generate and save global Excel spreadsheet report to GCS and Google Drive
+            global_excel_bytes = None
             try:
                 global_excel_bytes = generate_excel_from_array(batch_results, current_time=formatted_time)
                 save_excel_to_gcs(bucket, global_excel_bytes, timestamp=batch_timestamp)
             except Exception as e:
                 print(f"Non-fatal error generating/saving global Excel: {e}", file=sys.stderr)
+
+            # 3b. Save global Excel spreadsheet report to Google Drive (if configured)
+            if global_excel_bytes:
+                try:
+                    drive_folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
+                    if drive_folder_id:
+                        upload_excel_to_drive(
+                            file_content=global_excel_bytes,
+                            filename=f"batch_result_{batch_timestamp}.xlsx",
+                            folder_id=drive_folder_id,
+                        )
+                    else:
+                        print("Notice: GOOGLE_DRIVE_FOLDER_ID is not set. Skipping Google Drive upload.")
+                except Exception as drive_err:
+                    print(f"Non-fatal error saving global Excel to Google Drive: {drive_err}", file=sys.stderr)
 
             # 4. Generate and save separate country HTML and Excel reports to GCS
             country_groups = {}

@@ -24,5 +24,6 @@ gcloud run jobs deploy "${JOB}" \
   --set-env-vars "REPORT_RECIPIENT_EMAIL_SK=${REPORT_RECIPIENT_EMAIL_SK}" \
   --set-env-vars "REPORT_RECIPIENT_EMAIL_IN=${REPORT_RECIPIENT_EMAIL_IN}" \
   --set-env-vars "REPORT_RECIPIENT_EMAIL_CO=${REPORT_RECIPIENT_EMAIL_CO}" \
+  --set-env-vars "GOOGLE_DRIVE_FOLDER_ID=${GOOGLE_DRIVE_FOLDER_ID}" \
   --max-retries 0 \
   --execute-now

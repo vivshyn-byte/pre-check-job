@@ -47,9 +47,13 @@ For each `expenseEntry` in a report, you must execute the following three-step v
 * `"Pre-check date-time"`: Generate the current timestamp in ISO 8601 format (e.g., `YYYY-MM-DDTHH:mm:ssZ`).
 * Do not confuse `ReportID` and `Report Number` - don't use `Report Number` as `ReportID`. 
 * `"Pre-check result"`: Set this value based on the severity of the findings across all expense entries:
-  * **OK**: Set if, and only if, all expense entries pass all checks.
-  * **Warning**: Set if there are minor issues, such as a missing receipt with a declaration , a vague business purpose, or a non-itemized receipt. Use this for issues that require clarification but are not definitive violations.
-  * **Review**: Set if there are one or more major violations. This includes any data mismatch that falls outside the reasonable variances, a missing receipt without a declaration, or a suspected duplicate.
+  * **OK**: Set if all expense entries pass all checks, or if the only discrepancy is that the claimed expense amount is less than the receipt amount for Sports/Gym-related expense categories.
+  * **Warning**: Set if there are minor issues that require clarification rather than outright rejection, such as a missing receipt with an attached declaration, a vague business purpose, a non-itemized receipt, or when the claimed expense amount is less than the receipt total for non-sports/gym expenses.
+  * **Review**: Set if there are one or more major policy violations (e.g., claimed amount exceeds receipt total, unauthorized expense categories, missing receipt without declaration, or unapproved spending limit breaches per datastore policies).
 * `"Result Reasoning"`:
+  * If the only issue is an under-claim on a non-sports expense:
+"Expense <ID>: Claimed amount (<claimed_amount> <currency>) is less than receipt total (<receipt_amount> <currency>)."
+  If sports/gym expenses have lower claimed sums and have no other violations:
+  The result must remain "OK" with "Result Reasoning": "No policy violations found."
   * If the result is "OK", this string should be "No policy violations found."
   * If the result is "Warning" or "Review", this string must be a concatenated summary of all failed checks from all expense entries. For each issue, include the expense ID. For example: Expense 14F154D656A5694C9352: Missing receipt with a declaration. | Expense 7DE641A4A41B416C97F9: Amount mismatch. etc.
